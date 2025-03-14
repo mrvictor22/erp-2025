@@ -1,0 +1,85 @@
+services:
+  db:
+    image: postgres
+    container_name: erp-db
+    restart: always
+    ports:
+      - ${DB_PORT:-5432}:5432
+    environment:
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_DATABASE:-erp_2025}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d erp_2025"]
+      interval: 10s
+      retries: 5
+      start_period: 30s
+      timeout: 10s
+    volumes:
+      - erp_local_pgdata:/var/lib/postgresql/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command: ["postgres", "-c", "log_statement=all"]
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: erp_pgadmin4_container
+    restart: always
+    ports:
+      - ${PG_ADMIN_PORT:-8888}:80
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-postgres@postgres.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-postgres}
+    volumes:
+      - erp_pgadmin_data:/var/lib/pgadmin
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+  app:
+    build:
+      args:
+        user: erpuser
+        uid: 1000
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    image: erp-db
+    ports:
+      - ${APP_PHP_FPM_PORT:-9090}:9000
+    expose:
+      - ${APP_PHP_FPM_PORT:-9090}
+    container_name: erp-db-app
+    restart: unless-stopped
+    working_dir: /var/www/
+    tty: true
+    environment:
+      PHP_IDE_CONFIG:
+    volumes:
+      - ./:/var/www
+      - ./docker/php/conf.d/xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini
+      - ./docker/php/conf.d/error_reporting.ini:/usr/local/etc/php/conf.d/error_reporting.ini
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+        restart: true
+    entrypoint: ["/usr/local/bin/startup.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+  nginx:
+    image: nginx:alpine
+    container_name: erp-app-nginx
+    restart: unless-stopped
+    ports:
+      - ${APP_PORT:-8080}:80
+    volumes:
+      - ./:/var/www
+      - ./docker/nginx:/etc/nginx/conf.d/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+volumes:
+  erp_local_pgdata:
+  erp_pgadmin_data:
